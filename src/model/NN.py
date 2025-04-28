@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.fft as fft
-from setuptools.dist import sequence
 
 
 class Network(nn.Module):
@@ -71,9 +70,15 @@ class Network(nn.Module):
         x = relu(x)
         return x
 
-    def call(self, x):
+    def forward(self, x):
+        # Encoder处理
         x = self.EncoderP(x)
+
+        # FNO处理
         if self.fno_flag:
             x = self.SpectralConv1d(x, self.output_dim)
+            x = self.decoder(x)
+
+        return x.float()
 
 
