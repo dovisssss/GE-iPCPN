@@ -59,7 +59,21 @@ class Network(nn.Module):
            Returns:
                x: output tensor"""
         sequence_length = x.shape[1]
-        xo_fft = fft.rfft
+        xo_fft = fft.rfft(x.permute(0, 2, 1))
+        xo_fft = xo_fft[:, : , : self.modes]  #截断高频分量
+        x = fft.irfft(xo_fft, n=sequence_length)
+        x = x.permute(0, 2, 1)
+        return x
 
+    def DecoderQ(self, x):#没用到？
+        x = nn.Linear(self.output_dim)
+        relu = nn.ReLU()
+        x = relu(x)
+        return x
+
+    def call(self, x):
+        x = self.EncoderP(x)
+        if self.fno_flag:
+            x = self.SpectralConv1d(x, self.output_dim)
 
 
