@@ -1,0 +1,48 @@
+model:
+  fno_flag: True
+  kernel_size: 128
+  filters: 64
+  kernel_size_1: 4
+  modes: 200
+  input_dim: 1
+  lifting_dim: 64
+  output_dim: 1
+  output_dim_parallel: 1
+
+training:
+  batch_size: 5
+  pretrain_epochs: 1800
+  pretrain_lr: 1e-3
+  #NN training hyper_parameters
+  network_epochs: 500
+  network_initial_lr: 1e-3
+  network_decay_steps: 100
+  network_decay_rate: 0.98
+  network_minimum_lr: 5e-4
+  #physics training hyper_parameters
+  physics_epochs: 1000
+  physics_initial_lr: 1e-2
+  physics_decay_steps: 100
+  physics_decay_rate: 0.96
+  physics_minimum_lr: 1e-3
+  alternate_number: 0
+  lamda_velocity_int: 1.0e-3
+  lamda_l1: 2.0e-7
+
+dirs:
+  figures: "./figures/"
+  results: "./results/"
+  checkpoints: ".checkpoins/"
+  profiler: "./tboard/profiler/"
+  graphs: "./tboard/graphs/"
+  training: "./tboard/training/"
+  validation: "./tboard/validation/"
+  weights: "./tboard/weights/"
+  #问题：tboard是tf的数据可视化工具
+
+hydra:
+  run:
+    dir: ./outputs/${now:%Y%m%d_%H%M%S}    #?????
+  sweep:
+    dir: ./outputs/${now:%Y%m%d_%H%M%S}
+    subdir: running_number_${hydra.job.num}
