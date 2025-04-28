@@ -1,8 +1,6 @@
 import scipy.io as sio
 from einops import repeat
 
-from duffing_datagen import excitation_max, displacement_noisy_max
-
 
 def return_data(data_path, split_ratio):
     dataset = sio.loadmat(data_path)
