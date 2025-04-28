@@ -3,7 +3,7 @@ model:
   kernel_size: 128
   filters: 64
   kernel_size_1: 4
-  modes: 200
+  modes: 200   #是否为无速度观测模式，取值200的意义？
   input_dim: 1
   lifting_dim: 64
   output_dim: 1
