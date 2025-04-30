@@ -73,7 +73,7 @@ class Trainer:
     def network_train_step(self, model, dataloader, physics_flag=True):
         model.train()
         total_loss = 0.0
-        for btach_idx, (inputs, targets) in enumerate(dataloader):
+        for batch_idx, (inputs, targets) in enumerate(dataloader):
             inputs, targets = inputs.to(self.device), targets.to(self.device)
 
             optimizer = self.network_opt if physics_flag else self.pretrain_opt
@@ -119,7 +119,7 @@ class Trainer:
     def physics_train_step(self, model, dataloader):
         model.train()
         total_loss = 0.0
-        for btach_idx, (inputs, targets) in enumerate(dataloader):
+        for batch_idx, (inputs, targets) in enumerate(dataloader):
             inputs, targets = inputs.to(self.device), targets.to(self.device)
 
             self.physics_opt.zero_grad()
@@ -133,6 +133,26 @@ class Trainer:
             total_loss += loss.item()
 
         return total_loss / len(dataloader)
+
+    def physics_validate_step(self, model, dataloader):
+        model.eval()
+        total_loss = 0.0
+        total_vel_loss = 0.0
+        total_l1_loss = 0.0
+
+        with torch.no_grad():
+            for inputs, targets in dataloader:
+                inputs, targets = inputs.to(self.device), targets.to(self.device)
+                _, vel_loss, l1_loss = self.compute_losses(model, inputs, targets)
+
+                total_vel_loss += vel_loss.item()
+                total_l1_loss += l1_loss.item()
+                total_loss += (self.lamda_velocity_int * vel_loss + self.lamda_l1 * l1_loss).item()
+
+                avg_loss = total_loss / len(dataloader)
+                avg_vel = total_vel_loss / len(dataloader)
+                avg_l1 = total_l1_loss / len(dataloader)
+                return avg_loss, avg_vel, avg_l1
 
 """
 
