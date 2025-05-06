@@ -1,3 +1,9 @@
+data:
+  system: "duffing"
+  type: "nonautonomous"
+  split_ratio: 0.70
+  noise_ratio: 25
+
 model:
   fno_flag: True
   kernel_size: 128
