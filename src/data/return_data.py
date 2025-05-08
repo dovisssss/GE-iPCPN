@@ -14,11 +14,11 @@ def return_data(data_path, split_ratio):
     velocity_noisy_max = dataset["velocity_noisy_max"]
     velocity_noisy_max = velocity_noisy_max[0, 0]
 
-    excitation = dataset["excitation"]
-    displacement = dataset["displacement"]
-    displacement_noisy = dataset["displacement_noisy"]
-    velocity = dataset["velocity"]
-    velocity_noisy = dataset["velocity_noisy"]
+    excitation = dataset["excitation_matrix"]
+    displacement = dataset["displacement_matrix"]
+    displacement_noisy = dataset["displacement_noisy_matrix"]
+    velocity = dataset["velocity_matrix"]
+    velocity_noisy = dataset["velocity_noisy_matrix"]
 
     excitation = repeat(excitation, "batch seq -> batch seq c", c=1)
     displacement = repeat(displacement, "batch seq -> batch seq c", c=1)

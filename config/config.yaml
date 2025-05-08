@@ -48,7 +48,7 @@ dirs:
 
 hydra:
   run:
-    dir: ./outputs/${now:%Y%m%d_%H%M%S}    #?????
+    dir: ./outputs/${now:%Y%m%d_%H%M%S}
   sweep:
     dir: ./outputs/${now:%Y%m%d_%H%M%S}
     subdir: running_number_${hydra.job.num}

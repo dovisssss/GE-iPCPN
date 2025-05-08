@@ -100,8 +100,8 @@ data = {
     "velocity_noisy_max": velocity_noisy_max,
 }
 
-sio.savemat("duffing_simulation_noise5.mat", data)
-print("数据已保存为 duffing_simulation_noise5.mat")
+sio.savemat("nonautonomous_duffing_25.mat", data)
+print("数据已保存为 nonautonomous_duffing_25.mat")
 
 # 激励信号
 plt.subplot(3, 1, 1)

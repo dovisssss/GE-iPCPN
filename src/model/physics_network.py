@@ -1,10 +1,8 @@
 import torch
-from tensorflow.core.function.polymorphism.function_type import Parameter
-from tensorflow.python.ops.initializers_ns import local_variables
 
 from src.model.NN import Network
 import torch.nn as nn
-import torch.nn.parameter as parameter
+#import torch.nn.parameter as Parameter
 
 class PhysicsNetwork(nn.Module):
     def __init__(self,
@@ -33,14 +31,21 @@ class PhysicsNetwork(nn.Module):
         #displacement network
         self.displacement_model = Network(cfg)
 
+
+
         #源码是def_coefficient(prefix)
         #coefficient parameters
-        self.cx_params = nn.ParameterList([
-            Parameter(torch.tensor(1.0), #cx0
-            *[Parameter(1.0) for _ in range(number_library_terms - 1)])  #cx1, cx2...
-        ])
+        param = [nn.Parameter(torch.tensor(1.0))]
+        param += [nn.Parameter(torch.tensor(1.0)) for _ in range(number_library_terms-1)]
+        self.cx_params = nn.ParameterList(param)
         #stage label
         self.group_variables_called = False
+
+    def network_params(self):
+        return self.displacement_model.parameters()
+
+    def physics_params(self):
+        return self.cx_params
 
     def update_function(self, function):
         self.function_acceleration = function
@@ -82,12 +87,12 @@ class PhysicsNetwork(nn.Module):
         acceleration_fit = eval(self.function_acceleration, {}, local_variables)
 
         # calculate z2 by int_operator * lamda
-        integrated_normalized_velcocity = (
+        integrated_normalized_velocity = (
             torch.matmul(self.Phi_int, acceleration_fit) / self.velocity_max +
             normalized_velocity[:, 0:1 , :]  #initial velocity
         )
         # velocity error
-        normalized_velocity_error = integrated_normalized_velcocity - normalized_velocity
+        normalized_velocity_error = integrated_normalized_velocity - normalized_velocity
         self.group_variables()
 
         return normalized_displacement, normalized_velocity_error

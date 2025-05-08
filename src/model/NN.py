@@ -40,7 +40,8 @@ class Network(nn.Module):
 
     def EncoderP(self,inputs):
         #CNN-LSTM model for EncoderP
-        x = self.conv1d(inputs)
+        x = inputs.permute(0, 2, 1)
+        x = self.conv1d(x)
         x = self.lstm(x)
         x = self.swish(x)
         x = self.dense1(x)

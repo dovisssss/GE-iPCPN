@@ -1,335 +1,354 @@
-import numpy as np
+# physics_ao_trainer.py
 import os
+import numpy as np
 import torch
-from torch.optim import Adam
-from torch.utils.checkpoint import checkpoint
+import torch.nn as nn
+import torch.optim as optim
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
-from src.model.physics_network import PhysicsNetwork as PNetwork, PhysicsNetwork
-from src.model.custom_scheduler import CustomScheduler as Schedule, CustomScheduler
+from src.model.physics_network import PhysicsNetwork as PNetwork
+from src.model.custom_scheduler import CustomScheduler
 from src.model.function_library import FunctionLibrary as Library
 from src.visualization.plotting import plot_prediction, plot_loss_curve
 
 
 class Trainer:
-    def __init__(self, cfg, logger, output_dir, device):
+    def __init__(self, cfg, logger, output_dir):
         self.cfg = cfg
         self.logger = logger
-        self.device = device
         self.library = Library()
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-        # directory setting
-        checkpoint_dir = os.path.join(output_dir, cfg. dirs.checkpoints)
+        # 目录设置
+        checkpoint_dir = os.path.join(output_dir, cfg.dirs.checkpoints)
         if not os.path.exists(checkpoint_dir):
             os.makedirs(checkpoint_dir)
-        self.checkpoint_path = checkpoint_dir + "model"
-        self.figure_dir = os.path.join(output_dir, cfg. dirs.figures)
+        self.checkpoint_path = os.path.join(checkpoint_dir, "model.pth")
+
+        self.figure_dir = os.path.join(output_dir, cfg.dirs.figures)
         if not os.path.exists(self.figure_dir):
             os.makedirs(self.figure_dir)
 
-        self._init_optimizers(cfg)
-        self._init_loss_records()
-    #tensorflow允许预定义优化器参数，而pytorch要在模型创建（实例化）后将参数与优化器绑定
-    def _init_optimizers(self, cfg):
-        network_scheduler = Schedule(
-            optimizer=None,
-            initial_learning_rate=cfg.training.network_initial_lr,
-            decay_steps=cfg.training.network_decay_steps,
-            decay_rate=cfg.training.network_decay_rate,
-            min_lr=cfg.training.network_minimum_lr
+        # 损失函数和优化器占位符
+        self.mse = nn.MSELoss()
+        self.network_opt = None
+        self.physics_opt = None
+        self.pretrain_opt = None
+
+        # 学习率调度器
+        self.network_scheduler = CustomScheduler(
+            cfg.training.network_initial_lr,
+            cfg.training.network_decay_steps,
+            cfg.training.network_decay_rate,
+            cfg.training.network_minimum_lr
+        )
+        self.physics_scheduler = CustomScheduler(
+            cfg.training.physics_initial_lr,
+            cfg.training.physics_decay_steps,
+            cfg.training.physics_decay_rate,
+            cfg.training.physics_minimum_lr
         )
 
-        physics_schduler = Schedule(
-            optimizer=None,
-            initial_learning_rate=cfg.training.physics_initial_lr,
-            decay_steps=cfg.training.physics_decay_steps,
-            decay_rate=cfg.training.physics_decay_rate,
-            min_lr=cfg.training.physics_minimum_lr
-        )
+        # 训练参数
+        self.pretrain_loss_minimum = 1e10
+        self.physics_loss_minimum = 1e10
+        self.network_loss_minimum = 1e10
+        self.lambda_velocity_int = cfg.training.lamda_velocity_int
+        self.lambda_l1 = cfg.training.lamda_l1
 
-        self.pretrain_opt = Adam([], lr=cfg.training.pretrain_lr, betas=(0.9, 0.999))
-        #未定义network_opt和physics_opt
-
-    def _init_loss_records(self):
-        self.pretrain_loss_min = float('inf')
-        self.physics_loss_min = float('inf')
-        self.network_loss_min = float('inf')
-        self.lamda_velocity_int = self.cfg.training.lamda_velocity_int
-        self.lamda_l1 = self.cfg.training.lamda_l1
-
-    #calculate multi-tasks losses
-    def compute_losses(self, model, input, targets):
+    def compute_losses(self, model, input, output):
         normalized_displacement_hat, normalized_velocity_error = model.step_forward(input)
-
-        displacement_loss = torch.nn.functional.mse_loss(normalized_displacement_hat, targets)
-        velocity_loss = torch.nn.functional.mse_loss(
-            normalized_velocity_error, torch.zeros_like(normalized_velocity_error)
-        )
-        l1_loss = torch.sum(torch.stack([torch.abs(p) for p in model.physics_variables]))
-
+        displacement_loss = self.mse(output, normalized_displacement_hat)
+        velocity_loss = self.mse(normalized_velocity_error, torch.zeros_like(normalized_velocity_error))
+        l1_loss = torch.sum(torch.abs(model.get_physics_variables()))
         return displacement_loss, velocity_loss, l1_loss
 
-    def network_train_step(self, model, dataloader, physics_flag=True):
+    def network_train_step(self, model, training_dataset, physics_flag=True):
         model.train()
         total_loss = 0.0
-        for batch_idx, (inputs, targets) in enumerate(dataloader):
-            inputs, targets = inputs.to(self.device), targets.to(self.device)
+        for inputs, displacements in training_dataset:
+            inputs = inputs.to(self.device)
+            displacements = displacements.to(self.device)
 
-            optimizer = self.network_opt if physics_flag else self.pretrain_opt
-            optimizer.zero_grad()
-
-            displacement_loss, velocity_loss, l1_loss = self.compute_losses(model, inputs, targets)
-
-            if not physics_flag:
-                loss = displacement_loss
+            # 梯度清零
+            if physics_flag:
+                self.network_opt.zero_grad()
             else:
-                loss = displacement_loss + self.lamda_velocity_int + velocity_loss
+                self.pretrain_opt.zero_grad()
 
-            loss.backward()
-            optimizer.step()
+            # 前向传播和损失计算
+            displacement_loss, velocity_loss, l1_loss = self.compute_losses(model, inputs, displacements)
 
-            total_loss += loss.item()
-        return total_loss / len(dataloader)  #对应源代码中average_training_loss
+            # 计算总损失
+            if not physics_flag:
+                total_loss_step = displacement_loss
+            else:
+                total_loss_step = displacement_loss + self.lambda_velocity_int * velocity_loss
 
+            # 反向传播和优化
+            total_loss_step.backward()
+            if physics_flag:
+                self.network_opt.step()
+            else:
+                self.pretrain_opt.step()
 
-    def network_validate_step(self, model, dataloader, physics_flag=True):
+            total_loss += total_loss_step.item()
+
+        return total_loss / len(training_dataset)
+
+    def network_validate_step(self, model, validation_dataset, physics_flag=True):
         model.eval()
-        total_disp_loss = 0.0
-        total_vel_loss = 0.0
         total_loss = 0.0
-
         with torch.no_grad():
-            for inputs, targets in dataloader:
-                inputs, targets = inputs.to(self.device), targets.to(self.device)
-                disp_loss, vel_loss, _ = self.compute_losses(model, inputs, targets)
+            for inputs, displacements in validation_dataset:
+                inputs = inputs.to(self.device)
+                displacements = displacements.to(self.device)
 
-                total_disp_loss += disp_loss.item()
-                total_vel_loss += vel_loss.item()
+                displacement_loss, velocity_loss, l1_loss = self.compute_losses(model, inputs, displacements)
+
                 if physics_flag:
-                    total_loss += (disp_loss + self.lambda_velocity_int * vel_loss).item()
+                    total_loss_step = displacement_loss + self.lambda_velocity_int * velocity_loss
                 else:
-                    total_loss += disp_loss.item()
+                    total_loss_step = displacement_loss
 
-        avg_loss = total_loss / len(dataloader)
-        avg_disp = total_disp_loss / len(dataloader)
-        avg_vel = total_vel_loss / len(dataloader)
-        return (avg_loss, avg_disp, avg_vel) if physics_flag else avg_loss
+                total_loss += total_loss_step.item()
 
-    def physics_train_step(self, model, dataloader):
+        return total_loss / len(validation_dataset)
+
+    def physics_train_step(self, model, training_dataset):
         model.train()
         total_loss = 0.0
-        for batch_idx, (inputs, targets) in enumerate(dataloader):
-            inputs, targets = inputs.to(self.device), targets.to(self.device)
+        for inputs, displacements in training_dataset:
+            inputs = inputs.to(self.device)
+            displacements = displacements.to(self.device)
 
             self.physics_opt.zero_grad()
 
-            _, velocity_loss, l1_loss = self.compute_losses(model, inputs, targets)
+            displacement_loss, velocity_loss, l1_loss = self.compute_losses(model, inputs, displacements)
+            total_loss_step = self.lambda_velocity_int * velocity_loss + self.lambda_l1 * l1_loss
 
-            loss = self.lamda_velocity_int * velocity_loss + self.lamda_l1 * l1_loss
-
-            loss.backward()
+            total_loss_step.backward()
             self.physics_opt.step()
-            total_loss += loss.item()
 
-        return total_loss / len(dataloader)
+            total_loss += total_loss_step.item()
 
-    def physics_validate_step(self, model, dataloader):
+        return total_loss / len(training_dataset)
+
+    def physics_validate_step(self, model, validation_dataset):
         model.eval()
         total_loss = 0.0
-        total_vel_loss = 0.0
-        total_l1_loss = 0.0
-
         with torch.no_grad():
-            for inputs, targets in dataloader:
-                inputs, targets = inputs.to(self.device), targets.to(self.device)
-                _, vel_loss, l1_loss = self.compute_losses(model, inputs, targets)
-
-                total_vel_loss += vel_loss.item()
-                total_l1_loss += l1_loss.item()
-                total_loss += (self.lamda_velocity_int * vel_loss + self.lamda_l1 * l1_loss).item()
-
-                avg_loss = total_loss / len(dataloader)
-                avg_vel = total_vel_loss / len(dataloader)
-                avg_l1 = total_l1_loss / len(dataloader)
-                return avg_loss, avg_vel, avg_l1
-
-    def load_checkpoint(self, model, path):
-        #load checkpoints of model
-        checkpoint = torch.load(path)
-        model.load_state_dict(checkpoint["model_state"])
-        self.network_opt.load_state_dict(checkpoint["optimizers"]['network'])
-        self.physics_opt.load_state_dict(checkpoint["optimizers"]['physics'])
-        self.pretrain_opt.load_state_dict(checkpoint["optimizers"]['pretrain'])
-
-    def visualize_results(self, model, dataloader, clean_data, suffix):
-        model.eval()
-        all_preds = []
-        with torch.no_grad():
-            for inputs, _ in dataloader:
+            for inputs, displacements in validation_dataset:
                 inputs = inputs.to(self.device)
-                disp_pred, vel_pred = model.predict(inputs)
-                all_preds.append((disp_pred.cpu(), vel_pred.cpu()))
+                displacements = displacements.to(self.device)
 
-        disp_all = torch.cat(p[0] for p in all_preds)
-        vel_all = torch.cat(p[1] for p in all_preds)
+                displacement_loss, velocity_loss, l1_loss = self.compute_losses(model, inputs, displacements)
+                total_loss_step = self.lambda_velocity_int * velocity_loss + self.lambda_l1 * l1_loss
 
-        plot_prediction(disp_all, clean_data['displacement_clean'], "Predicted Displacement",
-                        f"{self.figure_dir}/displacement_hat_{suffix}.png")
-        plot_prediction(vel_all, clean_data['velocity_clean'], "Predicted Velocity",
-                        f"{self.figure_dir}/velocity_hat_{suffix}.png")
+                total_loss += total_loss_step.item()
+
+        return total_loss / len(validation_dataset)
+
+    def load_and_visualize_model(self, model, validation_dataset, clean_data, figure_suffix):
+        # 加载最优模型
+        model.load_state_dict(torch.load(self.checkpoint_path))
+        model.eval()
+
+        # 收集预测结果
+        excitation_all = []
+        predicted_displacement_all = []
+        predicted_velocity_all = []
+
+        with torch.no_grad():
+            for batch in validation_dataset:
+                inputs = batch[0].to(self.device)
+                displacement_hat, velocity_hat = model.step_forward(inputs)
+                excitation_all.append(inputs.cpu())
+                predicted_displacement_all.append(displacement_hat.cpu())
+                predicted_velocity_all.append(velocity_hat.cpu())
+
+        # 转换为numpy数组
+        excitation_all = torch.cat(excitation_all, dim=0).numpy()
+        predicted_displacement_all = torch.cat(predicted_displacement_all, dim=0).numpy()
+        predicted_velocity_all = torch.cat(predicted_velocity_all, dim=0).numpy()
+
+        # 可视化
+        plot_prediction(
+            predicted_displacement_all,
+            clean_data["displacement_clean"],
+            "Predicted displacement",
+            f"{self.figure_dir}/displacement_hat_{figure_suffix}.png"
+        )
+        plot_prediction(
+            predicted_velocity_all,
+            clean_data["velocity_clean"],
+            "Predicted velocity",
+            f"{self.figure_dir}/velocity_hat_{figure_suffix}.png"
+        )
         plt.close('all')
-        #return model, disp_all, vel_all
 
-    def train(self, train_loader, val_loader, Phi_int, Phi_diff, clean_data, max_values):
-        model = PhysicsNetwork(
-            self.cfg, Phi_int, Phi_diff,
-            self.library.terms_number,
-            self.library.build_functions(np.ones(self.library.terms_number)),
-            max_values
+        return model, excitation_all, predicted_displacement_all, predicted_velocity_all
+
+    def train_iteration(self, iteration, model, function_acceleration,
+                        train_dataset, validation_dataset, clean_data):
+        physics_epochs = self.cfg.training.physics_epochs
+        network_epochs = self.cfg.training.network_epochs
+
+        physics_train_loss = []
+        physics_val_loss = []
+        network_train_loss = []
+        network_val_loss = []
+
+        # 物理训练阶段
+        self.logger.info(3 * "----------------------------------")
+        self.logger.info(f"Iteration {iteration + 1}, Physics training")
+        for epoch in range(physics_epochs):
+            # 更新学习率
+            lr = self.physics_scheduler.get_lr(epoch)
+            for param_group in self.physics_opt.param_groups:
+                param_group['lr'] = lr
+
+            # 训练步骤
+            train_loss = self.physics_train_step(model, train_dataset)
+            val_loss = self.physics_validate_step(model, validation_dataset)
+
+            physics_train_loss.append(train_loss)
+            physics_val_loss.append(val_loss)
+
+            # 保存最佳模型
+            if val_loss < self.physics_loss_minimum:
+                self.physics_loss_minimum = val_loss
+                torch.save(model.state_dict(), self.checkpoint_path)
+
+            # 日志记录
+            if epoch % 100 == 0:
+                self.logger.info(
+                    f"Physics Epoch: {epoch + 1}/{physics_epochs} | "
+                    f"LR: {lr:.6f} | "
+                    f"Train Loss: {train_loss:.4e} | "
+                    f"Val Loss: {val_loss:.4e}"
+                )
+
+        # 绘制损失曲线
+        plot_loss_curve(
+            physics_train_loss, physics_val_loss,
+            "Physics Training", f"{self.figure_dir}/physics_loss_{iteration + 1}.png"
+        )
+
+        # 更新物理模型参数
+        model.clip_variables()
+        lambda_acceleration = [param for name, param in model.named_parameters() if "cx" in name]
+        function_acceleration = self.library.build_functions(lambda_acceleration)
+        model.update_function(function_acceleration)
+
+        # 网络训练阶段
+        self.logger.info(3 * "----------------------------------")
+        self.logger.info(f"Iteration {iteration + 1}, Network training")
+        for epoch in range(network_epochs):
+            # 更新学习率
+            lr = self.network_scheduler.get_lr(epoch)
+            for param_group in self.network_opt.param_groups:
+                param_group['lr'] = lr
+
+            # 训练步骤
+            train_loss = self.network_train_step(model, train_dataset)
+            val_loss, _, _ = self.network_validate_step(model, validation_dataset)
+
+            network_train_loss.append(train_loss)
+            network_val_loss.append(val_loss)
+
+            # 保存最佳模型
+            if val_loss < self.network_loss_minimum:
+                self.network_loss_minimum = val_loss
+                torch.save(model.state_dict(), self.checkpoint_path)
+
+            # 日志记录
+            if epoch % 100 == 0:
+                self.logger.info(
+                    f"Network Epoch: {epoch + 1}/{network_epochs} | "
+                    f"LR: {lr:.6f} | "
+                    f"Train Loss: {train_loss:.4e} | "
+                    f"Val Loss: {val_loss:.4e}"
+                )
+
+        # 绘制损失曲线
+        plot_loss_curve(
+            network_train_loss, network_val_loss,
+            "Network Training", f"{self.figure_dir}/network_loss_{iteration + 1}.png"
+        )
+
+        # 可视化当前模型
+        model, excitation, displacement, velocity = self.load_and_visualize_model(
+            model, validation_dataset, clean_data, f"AO_{iteration + 1}"
+        )
+
+        return model, excitation, displacement, velocity
+
+    def training(self, train_dataset, validation_dataset,
+                 Phi_int, Phi_diff, clean_data, max_values):
+        # 初始化模型
+        lambda_acceleration = np.ones(self.library.terms_number)
+        function_acceleration = self.library.build_functions(lambda_acceleration)
+        model = PNetwork(
+            self.cfg,
+            Phi_int=Phi_int,
+            Phi_diff=Phi_diff,
+            number_library_terms=self.library.terms_number,
+            function_acceleration=function_acceleration,
+            max_values=max_values
         ).to(self.device)
 
-        #bind optimizer parameters
-        self._bind_optimizers(model)
+        # 初始化优化器
+        self.network_opt = optim.Adam(model.network_params(), lr=self.cfg.training.network_initial_lr)
+        self.physics_opt = optim.Adam(model.physics_params(), lr=self.cfg.training.physics_initial_lr)
+        self.pretrain_opt = optim.Adam(model.network_params(), lr=self.cfg.training.pretrain_lr)
 
-        #pretrain stage
-        self.logger.info("Starting training...")
-        self._training_phase(model, train_loader, val_loader,
-                             epochs=self.cfg.training.pretrain_epochs,
-                             phase="pretrain")
+        # 预训练阶段
+        self.logger.info("Pretraining the displacement network")
+        pretrain_train_loss = []
+        pretrain_val_loss = []
+        for epoch in range(self.cfg.training.pretrain_epochs):
+            train_loss = self.network_train_step(model, train_dataset, physics_flag=False)
+            val_loss = self.network_validate_step(model, validation_dataset, physics_flag=False)
 
-        for iter in range(self.cfg.training.alternate_number):
-            self.logger.info(f"Alternation Iteration {iter+1}")
+            pretrain_train_loss.append(train_loss)
+            pretrain_val_loss.append(val_loss)
 
-            self._training_phase(model, train_loader, val_loader,
-                                 epochs=self.cfg.training.physics_epochs,
-                                 phase="physics")
+            if val_loss < self.pretrain_loss_minimum:
+                self.pretrain_loss_minimum = val_loss
+                torch.save(model.state_dict(), self.checkpoint_path)
 
-            self._training_phase(model, train_loader, val_loader,
-                                 epochs=self.cfg.training.network_epochs,
-                                 phase="network")
-
-            coeffs = [p.detach().cpu().numpy() for p in model.physics_variables]
-            func = self.library.get_functions(coeffs)
-            model.update_function(func)
-
-            # visualize current result
-            self.visualize_results(model, val_loader, clean_data, f"iter_{iter + 1}")
-
-        return model
-
-    def _bind_optimizers(self, model):
-        network_params = model.displacement_model.parameters()
-        physics_params = model.physics_variables
-
-        self.network_opt = Adam(network_params, lr=self.cfg.training.network_initial_lr,
-                                betas=(0.9,0.999))
-        self.physics_opt = Adam(physics_params, lr=self.cfg.training.physics_initial_lr,
-                                betas=(0.9,0.999))
-
-        self.network_scheduler = CustomScheduler(
-            self.network_opt,
-            initial_learning_rate=self.cfg.training.network_initial_lr,
-            decay_steps=self.cfg.training.network_epochs,
-            decay_rate=self.cfg.training.network_decay_rate,
-            min_lr=self.cfg.training.network_minimum_lr
-        )
-
-        self.physics_scheduler = CustomScheduler(
-            self.physics_opt,
-            initial_learning_rate=self.cfg.training.physics_initial_lr,
-            decay_steps=self.cfg.training.physics_decay_steps,
-            decay_rate=self.cfg.training.physics_decay_rate,
-            min_lr=self.cfg.training.physics_minimum_lr
-        )
-
-    def _training_phase(self, model, train_loader, val_loader, epochs, phase):
-        train_losses = []
-        val_losses = []
-        best_loss = float("inf")
-
-        for epoch in range(epochs):
-            if phase == "physics":
-                train_loss = self.physics_train_step(model, train_loader)
-                val_loss, val_vel, val_l1 = self.physics_validate_step(model, val_loader)
-            elif phase == "network":
-                train_loss = self.network_train_step(model, train_loader)
-                val_loss, val_disp, val_vel = self.network_validate_step(model, val_loader)
-            else:
-                train_loss = self.network_train_step(model, train_loader, physics_flag=False)
-                val_loss = self.network_validate_step(model, val_loader, physics_flag=False)
-
-            # record losses
-            train_losses.append(train_loss)
-            val_losses.append(val_loss)
-
-            if val_loss < best_loss:
-                best_loss = val_loss
-                self.save_checkpoint(model, f"{self.checkpoint_path}/best_{phase}.pt")
-
-            #output log
             if epoch % 100 == 0:
-                log_msg = f"{phase.capitalize()} Epoch: {epoch+1}/{epochs} | "
-                log_msg += f"LR:{self._get_current_lr(phase):.2e} | "
-                log_msg += f"Train: {train_loss:.3e} | Val: {val_loss:.3e}"
-
-                if phase == "physics":
-                    log_msg += f"| Vel: {val_vel:.3e} | l1: {val_l1:.3e}"
-                elif phase == "network":
-                    log_msg += f"| Disp: {val_disp:.3e} | Vel: {val_loss:.3e}"
-
-                self.logger.info(log_msg)
-
-            if phase == "physics":
-                self.physics_scheduler()
-            else:
-                self.network_scheduler()
+                self.logger.info(
+                    f"Pretrain Epoch: {epoch + 1}/{self.cfg.training.pretrain_epochs} | "
+                    f"Train Loss: {train_loss:.4e} | "
+                    f"Val Loss: {val_loss:.4e}"
+                )
 
         plot_loss_curve(
-            train_losses, val_losses,
-            title=f"{phase.capitalize()}  Training",
-            save_path=f"{self.figure_dir}/{phase}_loss.png"
+            pretrain_train_loss, pretrain_val_loss,
+            "Pretraining", f"{self.figure_dir}/pretrain_loss.png"
         )
 
-    def _get_current_lr(self, phase):
-        if phase == "physics":
-            return self.physics_opt.param_groups[0]["lr"]
-        else:
-            return self.network_opt.param_groups[0]["lr"]
+        for iteration in range(self.cfg.training.alternate_number):
+            (
+                model,
+                excitation_all,
+                displacement_all,
+                velocity_hat_all,
+            ) = self.train_iteration(
+                iteration,
+                model,
+                function_acceleration,
+                train_dataset,
+                validation_dataset,
+                clean_data,
+            )
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        return {
+            "model": model,
+            "excitation_all": excitation_all,
+            "displacement_all": displacement_all,
+            "velocity_hat_all": velocity_hat_all,
+        }

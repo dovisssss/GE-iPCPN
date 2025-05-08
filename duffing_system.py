@@ -3,14 +3,13 @@ import scipy
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from data.duffing_datagen import excitation_max, displacement_noisy_max, velocity_noisy_max
 from src.data import return_data
 from src.data.numercial_operator import integration_operator, differentiation_operator
 from src.model.physics_ao_trainer import Trainer
 from src.visualization.plotting import plot_training_data
 
 # set GPU
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class CustomDataset(Dataset):
     def __init__(self, *data):
@@ -30,6 +29,7 @@ def system_training(cfg, output_dir, logger):
     )
 
     data = return_data.return_data(data_path, cfg.data.split_ratio)
+
     fs = data["fs"]
     dt = 1/fs
     excitation_max = torch.tensor(data["excitation_max"], device=device)
@@ -38,8 +38,8 @@ def system_training(cfg, output_dir, logger):
 
     #displacement
     displacement_noisy_max = torch.tensor(data["displacement_noisy_max"], device=device)
-    displacemnet_train = torch.tensor(data["displacemnet_train"], device=device)
-    displacemnet_train_clean = torch.tensor(data["displacemnet_train_label"], device=device)
+    displacement_train = torch.tensor(data["displacement_train"], device=device)
+    displacement_train_clean = torch.tensor(data["displacement_train_label"], device=device)
     displacement_validation = torch.tensor(data["displacement_test"], device=device)
     displacement_validation_clean = torch.tensor(data["displacement_test_label"], device=device)
 
@@ -53,21 +53,21 @@ def system_training(cfg, output_dir, logger):
     os.makedirs(result_dir, exist_ok=True)
 
     plot_training_data(
-        displacemnet_train_clean.cpu().numpy(),
-        displacemnet_train.cpu().numpy(),
-        "displacemnet",
-        f"{figure_dir}/displacemnet_train.png",
+        displacement_train_clean.cpu().numpy(),
+        displacement_train.cpu().numpy(),
+        "displacement",
+        f"{figure_dir}/displacement_train.png",
     )
 
     batch_size = cfg.training.batch_size
     seq_len = excitation_train.shape[1]
 
-    train_dataset = CustomDataset(excitation_train,displacemnet_train)
+    train_dataset = CustomDataset(excitation_train,displacement_train)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, drop_last=True)
     val_dataset = CustomDataset(excitation_validation, displacement_validation)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, drop_last=True)
 
-    trainer = Trainer(cfg, logger, output_dir,device=device)
+    trainer = Trainer(cfg, logger, output_dir)
 
     batch_integration_operator = integration_operator(batch_size, seq_len, dt).to(device)
     batch_differentiation_operator = differentiation_operator(batch_size, seq_len, dt).to(device)
@@ -78,7 +78,7 @@ def system_training(cfg, output_dir, logger):
         "velocity_max": velocity_noisy_max,
     }
     clean_data = {
-        "displacemnet_clean": displacemnet_train_clean,
+        "displacement_clean": displacement_train_clean,
         "velocity_clean": velocity_test_clean,
     }
 
@@ -93,7 +93,7 @@ def system_training(cfg, output_dir, logger):
     )
 
 
-    displacement_all = trained_results["displacemnet_all"].cpu().numpy()
+    displacement_all = trained_results["displacement_all"].cpu().numpy()
     velocity_hat_all = trained_results["velocity_hat_all"].cpu().numpy()
     result_path = f"{result_dir}/{cfg.data.system}_{cfg.data.type}_{cfg.data.noise_ratio}.mat"
 
