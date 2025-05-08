@@ -42,10 +42,10 @@ class PhysicsNetwork(nn.Module):
         self.group_variables_called = False
 
     def network_params(self):
-        return self.displacement_model.parameters()
+        return list(self.displacement_model.parameters())
 
     def physics_params(self):
-        return self.cx_params
+        return list(self.cx_params)
 
     def update_function(self, function):
         self.function_acceleration = function
@@ -79,12 +79,12 @@ class PhysicsNetwork(nn.Module):
         # predict displacement and velocity
         normalized_displacement, normalized_velocity = self.predict(input)
 
-        f = input.float32() * self.excitation_max
-        x = normalized_displacement.float32()
-        y = normalized_velocity.float32()
+        f = input.float() * self.excitation_max
+        x = normalized_displacement.float()
+        y = normalized_velocity.float()
 
         local_variables = {"f": f, "x": x, "y": y, **coeff_dict}
-        acceleration_fit = eval(self.function_acceleration, {}, local_variables)
+        acceleration_fit = eval(self.function_acceleration, {'torch': torch}, local_variables)
 
         # calculate z2 by int_operator * lamda
         integrated_normalized_velocity = (

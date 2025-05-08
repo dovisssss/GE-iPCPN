@@ -1,5 +1,6 @@
 import scipy.io as sio
 from einops import repeat
+import numpy as np
 
 
 def return_data(data_path, split_ratio):

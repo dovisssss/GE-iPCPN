@@ -40,9 +40,11 @@ class Network(nn.Module):
 
     def EncoderP(self,inputs):
         #CNN-LSTM model for EncoderP
-        x = inputs.permute(0, 2, 1)
+        x = inputs.permute(0, 2, 1).float()
         x = self.conv1d(x)
-        x = self.lstm(x)
+        x = x.permute(0, 2, 1)
+        #x = self.lstm(x)
+        x, _ = self.lstm(x)
         x = self.swish(x)
         x = self.dense1(x)
         x = self.dropout1(x)
@@ -78,7 +80,7 @@ class Network(nn.Module):
         # FNO处理
         if self.fno_flag:
             x = self.SpectralConv1d(x, self.output_dim)
-            x = self.decoder(x)
+            #x = self.DecoderQ(x)
 
         return x.float()
 

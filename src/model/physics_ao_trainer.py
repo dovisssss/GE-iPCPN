@@ -61,7 +61,7 @@ class Trainer:
         normalized_displacement_hat, normalized_velocity_error = model.step_forward(input)
         displacement_loss = self.mse(output, normalized_displacement_hat)
         velocity_loss = self.mse(normalized_velocity_error, torch.zeros_like(normalized_velocity_error))
-        l1_loss = torch.sum(torch.abs(model.get_physics_variables()))
+        l1_loss = torch.sum(torch.abs(torch.stack(model.physics_variables)))
         return displacement_loss, velocity_loss, l1_loss
 
     def network_train_step(self, model, training_dataset, physics_flag=True):
