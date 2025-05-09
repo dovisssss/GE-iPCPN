@@ -17,7 +17,7 @@ model:
 
 training:
   batch_size: 5
-  pretrain_epochs: 1800
+  pretrain_epochs: 1000
   pretrain_lr: 1e-3
   #NN training hyper_parameters
   network_epochs: 500

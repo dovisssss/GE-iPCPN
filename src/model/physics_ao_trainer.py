@@ -331,6 +331,14 @@ class Trainer:
             "Pretraining", f"{self.figure_dir}/pretrain_loss.png"
         )
 
+        (model, excitation_all, displacement_all, velocity_hat_all) = (
+            self.load_and_visualize_model(
+                model,
+                validation_dataset,
+                clean_data,
+                f"pretrain",
+            )
+        )
         for iteration in range(self.cfg.training.alternate_number):
             (
                 model,

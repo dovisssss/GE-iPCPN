@@ -93,8 +93,8 @@ def system_training(cfg, output_dir, logger):
     )
 
 
-    displacement_all = trained_results["displacement_all"].cpu().numpy()
-    velocity_hat_all = trained_results["velocity_hat_all"].cpu().numpy()
+    displacement_all = trained_results["displacement_all"]
+    velocity_hat_all = trained_results["velocity_hat_all"]
     result_path = f"{result_dir}/{cfg.data.system}_{cfg.data.type}_{cfg.data.noise_ratio}.mat"
 
     scipy.io.savemat(
