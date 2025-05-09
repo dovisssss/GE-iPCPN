@@ -9,7 +9,7 @@ model:
   kernel_size: 128
   filters: 64
   kernel_size_1: 4
-  modes: 200   #是否为无速度观测模式，取值200的用于FNO截取高频分量
+  modes: 200   #取值200用于FNO截取高频分量
   input_dim: 1
   lifting_dim: 64
   output_dim: 1
@@ -17,7 +17,7 @@ model:
 
 training:
   batch_size: 5
-  pretrain_epochs: 1000
+  pretrain_epochs: 1500
   pretrain_lr: 1e-3
   #NN training hyper_parameters
   network_epochs: 500
@@ -31,14 +31,14 @@ training:
   physics_decay_steps: 100
   physics_decay_rate: 0.96
   physics_minimum_lr: 1e-3
-  alternate_number: 0
+  alternate_number: 5
   lamda_velocity_int: 1.0e-3
   lamda_l1: 2.0e-7
 
 dirs:
   figures: "./figures/"
   results: "./results/"
-  checkpoints: ".checkpoins/"
+  checkpoints: ".checkpoints/"
   profiler: "./tboard/profiler/"
   graphs: "./tboard/graphs/"
   training: "./tboard/training/"
