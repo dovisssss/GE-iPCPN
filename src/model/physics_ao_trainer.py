@@ -1,4 +1,3 @@
-# physics_ao_trainer.py
 import os
 import numpy as np
 import torch
@@ -100,21 +99,28 @@ class Trainer:
     def network_validate_step(self, model, validation_dataset, physics_flag=True):
         model.eval()
         total_loss = 0.0
+        total_displacement_loss = 0.0
+        total_velocity_loss = 0.0
+        total_l1_loss = 0.0
+
         with torch.no_grad():
             for inputs, displacements in validation_dataset:
                 inputs = inputs.to(self.device)
                 displacements = displacements.to(self.device)
 
                 displacement_loss, velocity_loss, l1_loss = self.compute_losses(model, inputs, displacements)
+                total_displacement_loss += displacement_loss.item()
+                total_velocity_loss += velocity_loss.item()
+                total_l1_loss += l1_loss.item()
+                total_loss += displacement_loss + self.lambda_velocity_int * velocity_loss
+            average_displacement_loss = total_displacement_loss / len(validation_dataset)
+            average_velocity_loss = total_velocity_loss / len(validation_dataset)
+            average_total_loss = total_loss / len(validation_dataset)
 
-                if physics_flag:
-                    total_loss_step = displacement_loss + self.lambda_velocity_int * velocity_loss
-                else:
-                    total_loss_step = displacement_loss
-
-                total_loss += total_loss_step.item()
-
-        return total_loss / len(validation_dataset)
+            if not physics_flag:
+                return average_displacement_loss
+            else:
+                return average_total_loss
 
     def physics_train_step(self, model, training_dataset):
         model.train()
@@ -163,7 +169,7 @@ class Trainer:
         with torch.no_grad():
             for batch in validation_dataset:
                 inputs = batch[0].to(self.device)
-                displacement_hat, velocity_hat = model.step_forward(inputs)
+                displacement_hat, velocity_hat = model.predict(inputs)
                 excitation_all.append(inputs.cpu())
                 predicted_displacement_all.append(displacement_hat.cpu())
                 predicted_velocity_all.append(velocity_hat.cpu())
@@ -239,6 +245,8 @@ class Trainer:
         # update the parameters of physics model
         model.clip_variables()
         lambda_acceleration = [param for name, param in model.named_parameters() if "cx" in name]
+        function_acceleration = self.library.get_functions(lambda_acceleration)
+        self.logger.info(f"Updated acceleration function: {function_acceleration}")
         function_acceleration = self.library.build_functions(lambda_acceleration)
         model.update_function(function_acceleration)
 
@@ -300,9 +308,9 @@ class Trainer:
         ).to(self.device)
 
         # initialize optimizer
-        self.network_opt = optim.Adam(model.network_params(), lr=self.cfg.training.network_initial_lr)
-        self.physics_opt = optim.Adam(model.physics_params(), lr=self.cfg.training.physics_initial_lr)
-        self.pretrain_opt = optim.Adam(model.network_params(), lr=self.cfg.training.pretrain_lr)
+        self.network_opt = optim.Adam(model.group_variables()[0], lr=self.cfg.training.network_initial_lr)
+        self.physics_opt = optim.Adam(model.group_variables()[1], lr=self.cfg.training.physics_initial_lr)
+        self.pretrain_opt = optim.Adam(model.group_variables()[0], lr=self.cfg.training.pretrain_lr)
 
         # pretraining phase
         self.logger.info("Pretraining the displacement network")

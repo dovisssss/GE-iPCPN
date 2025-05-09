@@ -51,6 +51,6 @@ class FunctionLibrary:
         for i in range(self.terms_number):
             term = self.library_terms[i]
             if coefficients[i] != 0:
-                function_x += f"+{coefficients[i].numpy():.4f}*{term}"
+                function_x += f"+{coefficients[i].detach().cpu().numpy():.4f}*{term}"
         function_x = function_x[1:].replace("+-" , "-")
         return function_x

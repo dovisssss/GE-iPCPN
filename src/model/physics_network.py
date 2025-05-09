@@ -28,12 +28,14 @@ class PhysicsNetwork(nn.Module):
         self.register_buffer("velocity_max",
                              torch.tensor(max_values["velocity_max"], dtype=torch.float32))
 
+        self.displacement_max = torch.tensor(max_values["displacement_max"], dtype=torch.float32)
+        self.velocity_max = torch.tensor(max_values["velocity_max"], dtype=torch.float32)
+        self.excitation_max = torch.tensor(max_values["excitation_max"], dtype=torch.float32)
+
+
         #displacement network
         self.displacement_model = Network(cfg)
 
-
-
-        #源码是def_coefficient(prefix)
         #coefficient parameters
         param = [nn.Parameter(torch.tensor(1.0))]
         param += [nn.Parameter(torch.tensor(1.0)) for _ in range(number_library_terms-1)]
@@ -41,11 +43,11 @@ class PhysicsNetwork(nn.Module):
         #stage label
         self.group_variables_called = False
 
-    def network_params(self):
-        return list(self.displacement_model.parameters())
+    #def network_params(self):
+    #    return list(self.displacement_model.parameters())
 
-    def physics_params(self):
-        return list(self.cx_params)
+    #def physics_params(self):
+    #    return list(self.cx_params)
 
     def update_function(self, function):
         self.function_acceleration = function
@@ -63,6 +65,7 @@ class PhysicsNetwork(nn.Module):
             self.network_variables = list(self.displacement_model.parameters())
             self.physics_variables = list(self.cx_params)
             self.group_variables_called = True
+        return self.network_variables, self.physics_variables
 
     # calculate z1_dot by diff_operator * z1
     def predict(self, input):
@@ -83,7 +86,7 @@ class PhysicsNetwork(nn.Module):
         x = normalized_displacement.float()
         y = normalized_velocity.float()
 
-        local_variables = {"f": f, "x": x, "y": y, **coeff_dict}
+        local_variables = {"f": f, "x": x, "y": y, **coeff_dict, "torch":torch}
         acceleration_fit = eval(self.function_acceleration, {'torch': torch}, local_variables)
 
         # calculate z2 by int_operator * lamda

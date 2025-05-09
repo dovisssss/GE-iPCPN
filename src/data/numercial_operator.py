@@ -28,7 +28,7 @@ def differentiation_operator(batch, seq_len, dt):
     phi_2 = temp1_pad + temp2_pad
 
     phi_3_part1 = torch.zeros(1, seq_len - 3)
-    phi_3_part2 = torch.tensor([[-1/2, 2, -3/2]], dtype=torch.float32)
+    phi_3_part2 = torch.tensor([[1/2, -2, 3/2]], dtype=torch.float32)
     phi_3 = torch.cat([phi_3_part1, phi_3_part2], dim=1)
 
     phi = torch.cat([phi_1, phi_2, phi_3], dim=0) #按行拼接dim=0
