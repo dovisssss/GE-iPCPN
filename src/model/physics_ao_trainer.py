@@ -280,9 +280,13 @@ class Trainer:
                     f"Val Loss: {val_loss:.4e}"
                 )
 
+        network_train_loss_cpu = [tensor.cpu() if torch.is_tensor(tensor) else tensor for tensor in
+                                   network_train_loss]
+        network_val_loss_cpu = [tensor.cpu() if torch.is_tensor(tensor) else tensor for tensor in
+                                   network_val_loss]
         # plot loss curve
         plot_loss_curve(
-            network_train_loss, network_val_loss,
+            network_train_loss_cpu, network_val_loss_cpu,
             "Network Training", f"{self.figure_dir}/network_loss_{iteration + 1}.png"
         )
 

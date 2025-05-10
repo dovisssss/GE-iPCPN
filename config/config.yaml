@@ -17,10 +17,10 @@ model:
 
 training:
   batch_size: 5
-  pretrain_epochs: 300
+  pretrain_epochs: 1500
   pretrain_lr: 1e-3
   #NN training hyper_parameters
-  network_epochs: 500
+  network_epochs: 600
   network_initial_lr: 1e-3
   network_decay_steps: 100
   network_decay_rate: 0.98
@@ -31,7 +31,7 @@ training:
   physics_decay_steps: 100
   physics_decay_rate: 0.96
   physics_minimum_lr: 1e-3
-  alternate_number: 2
+  alternate_number: 5
   lamda_velocity_int: 1.0e-3
   lamda_l1: 2.0e-7
 
