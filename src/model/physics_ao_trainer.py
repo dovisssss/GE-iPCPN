@@ -19,7 +19,7 @@ class Trainer:
         self.library = Library()
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-        # 目录设置
+        # setting directory
         checkpoint_dir = os.path.join(output_dir, cfg.dirs.checkpoints)
         if not os.path.exists(checkpoint_dir):
             os.makedirs(checkpoint_dir)
@@ -29,13 +29,13 @@ class Trainer:
         if not os.path.exists(self.figure_dir):
             os.makedirs(self.figure_dir)
 
-        # 损失函数和优化器占位符
+        # Loss function & optimizer Placeholder
         self.mse = nn.MSELoss()
         self.network_opt = None
         self.physics_opt = None
         self.pretrain_opt = None
 
-        # 学习率调度器
+        # learning rate scheduler
         self.network_scheduler = CustomScheduler(
             cfg.training.network_initial_lr,
             cfg.training.network_decay_steps,
@@ -49,7 +49,6 @@ class Trainer:
             cfg.training.physics_minimum_lr
         )
 
-        # 训练参数
         self.pretrain_loss_minimum = 1e10
         self.physics_loss_minimum = 1e10
         self.network_loss_minimum = 1e10
@@ -70,22 +69,22 @@ class Trainer:
             inputs = inputs.to(self.device)
             displacements = displacements.to(self.device)
 
-            # 梯度清零
+            # Gradient zeroing
             if physics_flag:
                 self.network_opt.zero_grad()
             else:
                 self.pretrain_opt.zero_grad()
 
-            # 前向传播和损失计算
+            # Forward propagation and loss calculation
             displacement_loss, velocity_loss, l1_loss = self.compute_losses(model, inputs, displacements)
 
-            # 计算总损失
+            # total loss
             if not physics_flag:
                 total_loss_step = displacement_loss
             else:
                 total_loss_step = displacement_loss + self.lambda_velocity_int * velocity_loss
 
-            # 反向传播和优化
+            # Backpropagation and optimization
             total_loss_step.backward()
             if physics_flag:
                 self.network_opt.step()

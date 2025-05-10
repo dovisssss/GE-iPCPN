@@ -1,5 +1,5 @@
 import torch
-from torch.optim.lr_scheduler import _LRScheduler  #应该可以直接运行可以忽略报错，或尝试去掉下划线
+from torch.optim.lr_scheduler import _LRScheduler
 
 class CustomScheduler(_LRScheduler):
     """

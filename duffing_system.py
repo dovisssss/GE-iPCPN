@@ -82,7 +82,6 @@ def system_training(cfg, output_dir, logger):
         "velocity_clean": velocity_test_clean,
     }
 
-    # training已被修改，输入参数与返回参数均不一致
     trained_results = trainer.training(
         train_loader,
         val_loader,

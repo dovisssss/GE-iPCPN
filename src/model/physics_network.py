@@ -69,14 +69,14 @@ class PhysicsNetwork(nn.Module):
 
     # calculate z1_dot by diff_operator * z1
     def predict(self, input):
-        # 归一化预测
+        # Normalized prediction
         normalized_displacement = self.displacement_model(input)
         velocity = torch.matmul(self.Phi_diff, normalized_displacement) * self.displacement_max
         normalized_velocity = velocity / self.velocity_max
         return normalized_displacement, normalized_velocity
 
     def step_forward(self, input):
-        # 获取动态系数
+        # Get coefficient
         coeff_dict = {f"cx{idx}": param for idx, param in enumerate(self.cx_params)}
 
         # predict displacement and velocity

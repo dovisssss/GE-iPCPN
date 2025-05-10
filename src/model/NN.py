@@ -22,10 +22,10 @@ class Network(nn.Module):
             out_channels=self.filters,
             kernel_size=self.kernel_size,
             padding='same'
-        )#未指定激活函数，应为tanh
+        )#haven't specified activation function
 
         self.lstm = nn.LSTM(
-            input_size=self.filters,#源码为input_shape=(None, self.input_dim)
+            input_size=self.filters,
             hidden_size=128,
             batch_first=True
         )
@@ -62,22 +62,22 @@ class Network(nn.Module):
                x: output tensor"""
         sequence_length = x.shape[1]
         xo_fft = fft.rfft(x.permute(0, 2, 1))
-        xo_fft = xo_fft[:, : , : self.modes]  #截断高频分量
+        xo_fft = xo_fft[:, : , : self.modes]  #High frequency component truncation
         x = fft.irfft(xo_fft, n=sequence_length)
         x = x.permute(0, 2, 1)
         return x
 
-    def DecoderQ(self, x):#没用到？
+    def DecoderQ(self, x):
         x = nn.Linear(self.output_dim)
         relu = nn.ReLU()
         x = relu(x)
         return x
 
     def forward(self, x):
-        # Encoder处理
+        # Encoder process
         x = self.EncoderP(x)
 
-        # FNO处理
+        # FNO process
         if self.fno_flag:
             x = self.SpectralConv1d(x, self.output_dim)
             #x = self.DecoderQ(x)

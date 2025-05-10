@@ -36,5 +36,3 @@ def differentiation_operator(batch, seq_len, dt):
     Phi = repeat(phi, "row col -> batch row col", batch=batch)
 
     return Phi
-
-#可能的问题：张量在GPU进行创建，后续调用方可能需要先将其移至cpu
