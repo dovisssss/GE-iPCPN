@@ -4,13 +4,13 @@ import scipy.io as sio
 import matplotlib.pyplot as plt
 # 参数设置
 m = 1.0  # 质量 (kg)
-c = 40.0  # 阻尼系数
-k = 3000.0  # 线性刚度
-kc = 5e8  # 立方刚度
+c = 0.1  # 阻尼系数
+k = 1  # 线性刚度
+kc = 5  # 立方刚度
 fs = 2000  # 采样频率 (Hz)
 dt = 1 / fs  # 时间间隔 (s)
 T = 40  # 总时间 (s)
-amplitude_target = 20  # 目标幅值 (N)
+amplitude_target = 2  # 目标幅值 (N)
 t = torch.arange(0, T, dt)  # 时间向量
 N = len(t)  # 采样点数
 
@@ -40,7 +40,7 @@ u_norm= min_max_normalize(u_scaled) #归一化后的激励信号
 
 # 初始条件
 x0 = 0.0  # 初始位移
-v0 = 0.0  # 初始速度
+v0 = 1.0  # 初始速度
 
 # Duffing系统的微分方程
 def duffing_system(x, v, u):
@@ -80,23 +80,38 @@ v_noisy = (v + noise_level * torch.std(v) * v_n)
 
 
 # 计算噪声数据的最大值
-displacement_noisy_max = torch.max(torch.abs(x_noisy)).item()
-velocity_noisy_max = torch.max(torch.abs(v_noisy)).item()
+displacement_noisy_max = 1#torch.max(torch.abs(x_noisy)).item()
+velocity_noisy_max = 1#torch.max(torch.abs(v_noisy)).item()
 x_norm = min_max_normalize(x)
 v_norm = min_max_normalize(v)
 x_noisy_norm = min_max_normalize(x_noisy)
 v_noisy_norm = min_max_normalize(v_noisy)
 
+def segment_data(data, segment_length):
+    num_segments = len(data) // segment_length
+    segmented_data = data[:num_segments * segment_length].reshape(num_segments, segment_length)
+    return segmented_data
+
+# 片段长度（2秒）
+segment_length = int(2 * fs)  # 2秒对应的采样点数
+
+# 分割激励信号和响应数据
+u_segments = segment_data(u_scaled, segment_length)
+x_segments = segment_data(x, segment_length)
+v_segments = segment_data(v, segment_length)
+x_noisy_segments = segment_data(x_noisy, segment_length)
+v_noisy_segments = segment_data(v_noisy, segment_length)
+
 # 保存为.mat文件
 data = {
     "fs": fs,
-    "excitation": u_norm.numpy(),
+    "excitation_matrix": u_segments.numpy(),  #u_norm.numpy(),
     "excitation_max": excitation_max,
-    "displacement": x_norm.numpy(),
-    "displacement_noisy": x_noisy_norm.numpy(),
+    "displacement_matrix": x_segments.numpy(),#x_norm.numpy(),
+    "displacement_noisy_matrix": x_noisy_segments.numpy(),#x_noisy_norm.numpy(),
     "displacement_noisy_max": displacement_noisy_max,
-    "velocity": v_norm.numpy(),
-    "velocity_noisy": v_noisy_norm.numpy(),
+    "velocity_matrix": v_segments.numpy(),#v_norm.numpy(),
+    "velocity_noisy_matrix": v_noisy_segments.numpy(),#v_noisy_norm.numpy(),
     "velocity_noisy_max": velocity_noisy_max,
 }
 
@@ -105,7 +120,7 @@ print("数据已保存为 nonautonomous_duffing_25.mat")
 
 # 激励信号
 plt.subplot(3, 1, 1)
-plt.plot(t, u_norm, label="Excitation Signal")
+plt.plot(t, u_scaled, label="Excitation Signal")
 plt.title("Excitation Signal")
 plt.xlabel("Time (s)")
 plt.ylabel("Amplitude")
@@ -114,8 +129,8 @@ plt.grid()
 
 # 位移响应
 plt.subplot(3, 1, 2)
-plt.plot(t, x_norm, label="Displacement Response", color="orange")
-plt.plot(t, x_noisy_norm, label="Noisy Displacement Response", color="red", alpha=0.5)
+plt.plot(t, x, label="Displacement Response", color="orange")
+#plt.plot(t, x_noisy, label="Noisy Displacement Response", color="red", alpha=0.5)
 plt.title("Displacement Response")
 plt.xlabel("Time (s)")
 plt.ylabel("Amplitude")
@@ -124,8 +139,8 @@ plt.grid()
 
 # 速度响应
 plt.subplot(3, 1, 3)
-plt.plot(t, v_norm, label="Velocity Response", color="green")
-plt.plot(t, v_noisy_norm, label="Noisy Velocity Response", color="blue", alpha=0.5)
+plt.plot(t, v, label="Velocity Response", color="green")
+#plt.plot(t, v_noisy, label="Noisy Velocity Response", color="blue", alpha=0.5)
 plt.title("Velocity Response")
 plt.xlabel("Time (s)")
 plt.ylabel("Amplitude")

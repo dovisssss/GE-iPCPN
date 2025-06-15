@@ -1,5 +1,6 @@
 import torch
 from einops import repeat
+from scipy.signal import savgol_filter
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -36,3 +37,11 @@ def differentiation_operator(batch, seq_len, dt):
     Phi = repeat(phi, "row col -> batch row col", batch=batch)
 
     return Phi
+
+def sg_filter(input_tensor, window_size=11, poly_order=3, deriv=1, axis=1):
+    # 将 tensor 转移到 CPU，并转为 numpy 数组
+    input_np = input_tensor.detach().cpu().numpy()
+    # 对 numpy 数组沿指定轴应用 savgol_filter
+    filtered_np = savgol_filter(input_np, window_size, poly_order, deriv=deriv, axis=axis)
+    # 将结果转换回 tensor，并放回原来的设备
+    return torch.tensor(filtered_np, device=input_tensor.device)

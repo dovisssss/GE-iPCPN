@@ -31,9 +31,11 @@ training:
   physics_decay_steps: 100
   physics_decay_rate: 0.96
   physics_minimum_lr: 1e-3
-  alternate_number: 5
+  alternate_number: 6
   lamda_velocity_int: 1.0e-3
   lamda_l1: 2.0e-7
+  lamda_grad_l1: 1.0e-6
+  lamda_gradient_enhanced: 1.0e-3
 
 dirs:
   figures: "./figures/"

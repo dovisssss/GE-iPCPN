@@ -5,6 +5,7 @@ from omegaconf import OmegaConf, DictConfig
 from hydra.core.hydra_config import HydraConfig
 
 from duffing_system import system_training
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 logger = logging.getLogger(__name__)
 

@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from src.model.physics_network import PhysicsNetwork as PNetwork
 from src.model.custom_scheduler import CustomScheduler
 from src.model.function_library import FunctionLibrary as Library
+from src.model.grad_function_lib import gradFunctionLibrary as GradFunctionLibrary
 from src.visualization.plotting import plot_prediction, plot_loss_curve
 
 
@@ -17,6 +18,7 @@ class Trainer:
         self.cfg = cfg
         self.logger = logger
         self.library = Library()
+        self.grad_library = GradFunctionLibrary()
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
         # setting directory
@@ -33,6 +35,7 @@ class Trainer:
         self.mse = nn.MSELoss()
         self.network_opt = None
         self.physics_opt = None
+        self.physics_grad_opt = None
         self.pretrain_opt = None
 
         # learning rate scheduler
@@ -54,13 +57,17 @@ class Trainer:
         self.network_loss_minimum = 1e10
         self.lambda_velocity_int = cfg.training.lamda_velocity_int
         self.lambda_l1 = cfg.training.lamda_l1
+        self.lambda_grad_l1 = cfg.training.lamda_grad_l1
+        self.lambda_gradient = cfg.training.lamda_gradient_enhanced
 
     def compute_losses(self, model, input, output):
-        normalized_displacement_hat, normalized_velocity_error = model.step_forward(input)
+        normalized_displacement_hat, normalized_velocity_error, acc_error = model.step_forward(input)
         displacement_loss = self.mse(output, normalized_displacement_hat)
         velocity_loss = self.mse(normalized_velocity_error, torch.zeros_like(normalized_velocity_error))
+        acc_loss = self.mse(acc_error, torch.zeros_like(acc_error))
         l1_loss = torch.sum(torch.abs(torch.stack(model.physics_variables)))
-        return displacement_loss, velocity_loss, l1_loss
+        grad_l1_loss = torch.sum(torch.abs(torch.stack(model.physics_grad_variables)))
+        return displacement_loss, velocity_loss, l1_loss, acc_loss, grad_l1_loss
 
     def network_train_step(self, model, training_dataset, physics_flag=True):
         model.train()
@@ -76,13 +83,13 @@ class Trainer:
                 self.pretrain_opt.zero_grad()
 
             # Forward propagation and loss calculation
-            displacement_loss, velocity_loss, l1_loss = self.compute_losses(model, inputs, displacements)
+            displacement_loss, velocity_loss, l1_loss, acc_loss, grad_l1_loss = self.compute_losses(model, inputs, displacements)
 
             # total loss
             if not physics_flag:
                 total_loss_step = displacement_loss
             else:
-                total_loss_step = displacement_loss + self.lambda_velocity_int * velocity_loss
+                total_loss_step = displacement_loss + self.lambda_velocity_int * velocity_loss + self.lambda_gradient * acc_loss
 
             # Backpropagation and optimization
             total_loss_step.backward()
@@ -101,17 +108,19 @@ class Trainer:
         total_displacement_loss = 0.0
         total_velocity_loss = 0.0
         total_l1_loss = 0.0
+        total_acc_loss = 0.0
 
         with torch.no_grad():
             for inputs, displacements in validation_dataset:
                 inputs = inputs.to(self.device)
                 displacements = displacements.to(self.device)
 
-                displacement_loss, velocity_loss, l1_loss = self.compute_losses(model, inputs, displacements)
+                displacement_loss, velocity_loss, l1_loss, acc_loss, grad_l1_loss = self.compute_losses(model, inputs, displacements)
                 total_displacement_loss += displacement_loss.item()
                 total_velocity_loss += velocity_loss.item()
                 total_l1_loss += l1_loss.item()
-                total_loss += displacement_loss + self.lambda_velocity_int * velocity_loss
+                total_acc_loss += acc_loss.item()
+                total_loss += displacement_loss + self.lambda_velocity_int * velocity_loss + self.lambda_gradient * acc_loss
             average_displacement_loss = total_displacement_loss / len(validation_dataset)
             average_velocity_loss = total_velocity_loss / len(validation_dataset)
             average_total_loss = total_loss / len(validation_dataset)
@@ -129,12 +138,14 @@ class Trainer:
             displacements = displacements.to(self.device)
 
             self.physics_opt.zero_grad()
+            self.physics_grad_opt.zero_grad()
 
-            displacement_loss, velocity_loss, l1_loss = self.compute_losses(model, inputs, displacements)
-            total_loss_step = self.lambda_velocity_int * velocity_loss + self.lambda_l1 * l1_loss
+            displacement_loss, velocity_loss, l1_loss, acc_loss, grad_l1_loss = self.compute_losses(model, inputs, displacements)
+            total_loss_step = self.lambda_velocity_int * velocity_loss + self.lambda_l1 * l1_loss + self.lambda_gradient * acc_loss + self.lambda_grad_l1 * grad_l1_loss
 
             total_loss_step.backward()
             self.physics_opt.step()
+            self.physics_grad_opt.step()
 
             total_loss += total_loss_step.item()
 
@@ -148,8 +159,8 @@ class Trainer:
                 inputs = inputs.to(self.device)
                 displacements = displacements.to(self.device)
 
-                displacement_loss, velocity_loss, l1_loss = self.compute_losses(model, inputs, displacements)
-                total_loss_step = self.lambda_velocity_int * velocity_loss + self.lambda_l1 * l1_loss
+                displacement_loss, velocity_loss, l1_loss, acc_loss, grad_l1_loss = self.compute_losses(model, inputs, displacements)
+                total_loss_step = self.lambda_velocity_int * velocity_loss + self.lambda_l1 * l1_loss + self.lambda_gradient * acc_loss + self.lambda_grad_l1 * grad_l1_loss
 
                 total_loss += total_loss_step.item()
 
@@ -213,6 +224,8 @@ class Trainer:
             lr = self.physics_scheduler.get_lr(epoch)
             for param_group in self.physics_opt.param_groups:
                 param_group['lr'] = lr
+            for param_group in self.physics_grad_opt.param_groups:
+                param_group['lr'] = lr
 
             # training steps
             train_loss = self.physics_train_step(model, train_dataset)
@@ -247,7 +260,12 @@ class Trainer:
         function_acceleration = self.library.get_functions(lambda_acceleration)
         self.logger.info(f"Updated acceleration function: {function_acceleration}")
         function_acceleration = self.library.build_functions(lambda_acceleration)
-        model.update_function(function_acceleration)
+
+        lambda_grad = [param for name, param in model.named_parameters() if "grad" in name]
+        grad_expression = self.grad_library.get_functions(lambda_grad)
+        self.logger.info(f"Updated acceleration_grad function: {grad_expression}")
+        grad_expression = self.grad_library.build_functions(lambda_grad)
+        model.update_function(function_acceleration, grad_expression)
 
         # network training phase
         self.logger.info(3 * "----------------------------------")
@@ -301,18 +319,23 @@ class Trainer:
         # initialize model
         lambda_acceleration = np.ones(self.library.terms_number)
         function_acceleration = self.library.build_functions(lambda_acceleration)
+        lambda_grad = np.ones(self.grad_library.terms_number)
+        grad_expression = self.grad_library.build_functions(lambda_grad)
         model = PNetwork(
             self.cfg,
             Phi_int=Phi_int,
             Phi_diff=Phi_diff,
             number_library_terms=self.library.terms_number,
+            number_grad_library_terms=self.grad_library.terms_number,
             function_acceleration=function_acceleration,
+            grad_expression=grad_expression,
             max_values=max_values
         ).to(self.device)
 
         # initialize optimizer
         self.network_opt = optim.Adam(model.group_variables()[0], lr=self.cfg.training.network_initial_lr)
         self.physics_opt = optim.Adam(model.group_variables()[1], lr=self.cfg.training.physics_initial_lr)
+        self.physics_grad_opt = optim.Adam(model.group_variables()[2], lr=self.cfg.training.physics_initial_lr)
         self.pretrain_opt = optim.Adam(model.group_variables()[0], lr=self.cfg.training.pretrain_lr)
 
         # pretraining phase
